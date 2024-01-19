@@ -1,145 +1,72 @@
 #include "mbed.h"
-#include "PinDetect.h"
-//class for 3 PWM color values for RGBLED
-class LEDColor
-{
-public:
-    LEDColor(float r, float g, float b);
-    float red;
-    float green;
-    float blue;
-};
-LEDColor:: LEDColor(float r, float g, float b)
-    : red(r), green(g), blue(b)
-{
-}
-//Operator overload to adjust brightness with no color change
-LEDColor operator * (const LEDColor& x, const float& b)
-{
-    return LEDColor(x.red*b,x.green*b,x.blue*b);
-}
-//Operator overload to add colors
-LEDColor operator + (const LEDColor& x, const LEDColor& y)
-{
-    return LEDColor(x.red+y.red,x.green+y.green,x.blue+y.blue);
-}
 
-//Class to control an RGB LED using three PWM pins
-class RGBLed
+BusOut mbedleds(LED1,LED2,LED3,LED4);
+//BusOut/In is faster than multiple DigitalOut/Ins
+
+class Nav_Switch
 {
 public:
-    RGBLed(PinName redpin, PinName greenpin, PinName bluepin);
-    void write(float red,float green, float blue);
-    void write(LEDColor c);
-    void writeRed(float red);
-    void writeBlue(float blue);
-    void writeGreen(float green);
-    RGBLed operator = (LEDColor c) {
-        write(c);
-        return *this;
+    Nav_Switch(PinName up,PinName down,PinName left,PinName right,PinName fire);
+    int read();
+//boolean functions to test each switch
+    bool up();
+    bool down();
+    bool left();
+    bool right();
+    bool fire();
+//automatic read on RHS
+    operator int ();
+//index to any switch array style
+    bool operator[](int index) {
+        return _pins[index];
     };
 private:
-    PwmOut _redpin;
-    PwmOut _greenpin;
-    PwmOut _bluepin;
+    BusIn _pins;
+
 };
-
-RGBLed::RGBLed (PinName redpin, PinName greenpin, PinName bluepin)
-    : _redpin(redpin), _greenpin(greenpin), _bluepin(bluepin)
+Nav_Switch::Nav_Switch (PinName up,PinName down,PinName left,PinName right,PinName fire):
+    _pins(up, down, left, right, fire)
 {
-    //50Hz PWM clock default a bit too low, go to 2000Hz (less flicker)
-    _redpin.period(0.0005);
+    _pins.mode(PullUp); //needed if pullups not on board or a bare nav switch is used - delete otherwise
+    wait(0.001); //delays just a bit for pullups to pull inputs high
 }
-
-void RGBLed::write(float red,float green, float blue)
+inline bool Nav_Switch::up()
 {
-    _redpin = red;
-    _greenpin = green;
-    _bluepin = blue;
+    return !(_pins[0]);
 }
-void RGBLed::write(LEDColor c)
+inline bool Nav_Switch::down()
 {
-    _redpin = c.red;
-    _greenpin = c.green;
-    _bluepin = c.blue;
+    return !(_pins[1]);
 }
-void RGBLed::writeRed(float red)
+inline bool Nav_Switch::left()
 {
-    _redpin = red;
+    return !(_pins[2]);
 }
-void RGBLed::writeGreen(float green)
+inline bool Nav_Switch::right()
 {
-    _greenpin = green;
+    return !(_pins[3]);
 }
-void RGBLed::writeBlue(float blue)
+inline bool Nav_Switch::fire()
 {
-    _bluepin = blue;
+    return !(_pins[4]);
 }
+inline int Nav_Switch::read()
+{
+    return _pins.read();
+}
+inline Nav_Switch::operator int ()
+{
+    return _pins.read();
+}
+Nav_Switch myNav( p9, p6, p7, p5, p8); //pin order on Sparkfun breakout
 
-
-//classes could be moved to include file
-
-
-//Setup RGB led using PWM pins and class
-RGBLed myRGBled(p23,p22,p21); //RGB PWM pins
-DigitalIn switchInputRed(p13);
-DigitalIn switchInputBlue(p14);
-DigitalIn switchInputGreen(p15);
-PinDetect pb1(p16);
-PinDetect pb2(p17);
-//setup some color objects in flash using const's
-// const LEDColor red(1.0,0.0,0.0);
-// const LEDColor green(0.0,0.2,0.0);
-// //brighter green LED is scaled down to same as red and
-// //blue LED outputs on Sparkfun RGBLED
-// const LEDColor blue(0.0,0.0,1.0);
-// const LEDColor yellow(1.0,0.2,0.0);
-// const LEDColor white(1.0,0.2,1.0);
-bool redOn = false;
-bool greenOn = false;
-bool blueOn = false;
-float brightness = 1.0f;
-int oldpb1 = 0;
-int oldpb2 = 0;
 int main()
 {
-    wait(.01);
     while(1) {
-        switchInputRed.mode(PullUp);
-        switchInputGreen.mode(PullUp);
-        switchInputBlue.mode(PullUp);
-        pb1.mode(PullUp);
-        pb2.mode(PullUp);
-        redOn = !switchInputRed;
-        greenOn = !switchInputGreen;
-        blueOn = !switchInputBlue;
-
-        if ((oldpb1 == 1) && (pb1 == 0) && brightness < 1.0f) {
-            brightness += 0.1f;
-        }
-        if ((oldpb2 == 1) && (pb2 == 0) && brightness > 0.0f) {
-            brightness -= 0.1f;
-        }
-        if (redOn) {
-            myRGBled.writeRed(brightness);
-        }
-        else {
-            myRGBled.writeRed(0);
-        }
-        if (greenOn) {
-            myRGBled.writeGreen(brightness);
-        }
-        else {
-            myRGBled.writeGreen(0);
-        }
-        if (blueOn) {
-            myRGBled.writeBlue(brightness);
-        }
-        else {
-            myRGBled.writeBlue(0);
-        }
-        oldpb1 = pb1;
-        oldpb2 = pb2;
-        wait(.1);
+        //with pullups a button hit is a "0" - "~" inverts data to leds
+        mbedleds = ~(myNav & 0x0F); //update leds with nav switch direction inputs
+        if(myNav.fire()) mbedleds = 0x0F; //special all leds on case for fire (center button)
+        //or use - if(myNav[4]==0) mbedleds = 0x0F; //can index a switch bit like this
+        wait(0.02);
     }
 }
